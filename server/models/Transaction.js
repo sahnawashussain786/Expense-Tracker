@@ -173,10 +173,10 @@ function memoryAggregate(pipeline) {
       if (doc.amount > max) max = doc.amount
       if (doc.amount < min) min = doc.amount
     }
-    return [{ _id: null, totalSpent: total, average: count > 0 ? total / count : 0, count, maxTransaction: max === Infinity ? 0 : max, minTransaction: min === Infinity ? 0 : min }]
+    return [{ _id: null, totalSpent: total, total: total, average: count > 0 ? total / count : 0, count, maxTransaction: max === Infinity ? 0 : max, minTransaction: min === Infinity ? 0 : min }]
   }
 
-  return []
+  return result.length > 0 ? result : [{ _id: null, total: 0 }]
 }
 
 // Override model methods for memory mode
