@@ -28,8 +28,15 @@ if errorlevel 1 (
 echo ✅ Client install complete
 echo.
 
-echo [3/4] Starting backend (port 5000) and frontend (Vite dev server)...
+echo [3/4] Ensuring concurrently is installed...
 cd ..
+npm install concurrently --save-dev >nul 2>&1
+if errorlevel 1 (
+    echo ⚠️  Warning: Could not install concurrently, but continuing...
+)
+echo.
+
+echo [4/4] Starting backend (port 5000) and frontend (Vite dev server)...
 echo.
 
 echo 🚀 Backend: http://localhost:5000
