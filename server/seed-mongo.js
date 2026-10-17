@@ -49,7 +49,7 @@ const USER_DATA = [
     currency: CURRENCY,
     notificationsEnabled: true,
     autoCategorize: true,
-    favoriteCategories: ['Education', 'Technology', 'Food & Dining'],
+    favoriteCategories: ['Education', 'Shopping', 'Food & Dining'],
   },
 ]
 
@@ -188,7 +188,6 @@ async function run() {
   const User = require('./models/User')
   const Transaction = require('./models/Transaction')
   const Budget = require('./models/Budget')
-
 
   // Wipe any previous seed runs for these emails (idempotent reruns).
   // Goals are embedded in User, so deleting users also cleans their goals.
