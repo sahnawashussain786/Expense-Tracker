@@ -423,11 +423,15 @@ const getSummary = async (req, res) => {
   const end = endDate ? new Date(endDate) : now
 
   try {
+    const userId = req.user.id && typeof req.user.id === 'string'
+      ? new mongoose.Types.ObjectId(req.user.id)
+      : req.user.id
     const match = {
-      user: req.user.id,
+      user: userId,
       date: { $gte: start, $lte: end },
       type: 'expense'
     }
+    console.log('[getSummary DEBUG] req.user.id=', req.user.id, 'userId=', userId, 'userId constructor=', userId && userId.constructor && userId.constructor.name)
 
     // Category breakdown
     const categoryBreakdown = await Transaction.aggregate([
