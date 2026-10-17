@@ -36,16 +36,16 @@ export const BUDGET_PERIODS = [
   { value: 'yearly', label: 'Yearly', icon: '📅' },
 ]
 
-export function formatCurrency(amount, currency = 'USD') {
+export function formatCurrency(amount, currency = 'INR') {
   try {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency,
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2,
     }).format(amount)
   } catch {
-    return `$${amount.toFixed(2)}`
+    return `Rs.${amount.toFixed(0)}`
   }
 }
 

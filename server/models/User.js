@@ -45,7 +45,7 @@ const userSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'USD',
+    default: process.env.CURRENCY || 'INR',
     enum: ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD']
   },
   notificationsEnabled: {

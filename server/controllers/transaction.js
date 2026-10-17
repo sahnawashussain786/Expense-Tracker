@@ -138,10 +138,10 @@ const getTransactions = async (req, res) => {
       })
       transactions = docs.slice((page - 1) * limit, page * limit)
     } else {
-      const transactions = await Transaction.find(query)
+      transactions = await Transaction.find(query)
         .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
-        .limit(limit * 1)
         .skip((page - 1) * limit)
+        .limit(limit)
         .lean()
     }
 
@@ -712,7 +712,8 @@ function getPeriodStart(period, startDate) {
 }
 
 function formatCurrency(amount) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
+  const currency = process.env.CURRENCY || 'INR'
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount)
 }
 
 module.exports = {

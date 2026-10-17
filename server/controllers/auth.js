@@ -38,7 +38,7 @@ const register = async (req, res) => {
         monthlyBudget: 0,
         weeklyBudget: 0,
         semesterBudget: 0,
-        currency: 'USD',
+        currency: process.env.CURRENCY || 'INR',
         notificationsEnabled: true,
         autoCategorize: true,
         favoriteCategories: [],
