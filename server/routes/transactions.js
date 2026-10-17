@@ -9,7 +9,7 @@ const {
   bulkImport,
   getSummary,
   getBudgetAlerts
-} = require('../controllers/transactionController')
+} = require('../controllers/transaction')
 const auth = require('../middleware/auth')
 
 router.use(auth)

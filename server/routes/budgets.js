@@ -7,7 +7,7 @@ const {
   updateBudget,
   deleteBudget,
   getBudgetHistory
-} = require('../controllers/budgetController')
+} = require('../controllers/budget')
 const auth = require('../middleware/auth')
 
 router.use(auth)

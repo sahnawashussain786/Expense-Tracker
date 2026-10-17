@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+node_modules
+.env
+.env.local
+*.log
+.DS_Store/
 
 # Environment files (keep example templates tracked)
 .env

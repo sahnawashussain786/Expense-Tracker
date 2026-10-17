@@ -5,7 +5,7 @@ const {
   createGoal,
   updateGoal,
   deleteGoal
-} = require('../controllers/goalController')
+} = require('../controllers/goal')
 const auth = require('../middleware/auth')
 
 router.use(auth)

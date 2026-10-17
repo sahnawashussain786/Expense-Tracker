@@ -8,7 +8,7 @@ const {
   updatePassword,
   deleteAccount,
   updateFavorites
-} = require('../controllers/authController')
+} = require('../controllers/auth')
 const auth = require('../middleware/auth')
 
 router.post('/register', register)
