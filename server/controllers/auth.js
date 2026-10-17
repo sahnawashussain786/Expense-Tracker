@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
 const config = require('../config')
+const { isMemoryMode, memory, generateId } = require('../db')
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -23,12 +24,34 @@ const register = async (req, res) => {
     }
 
     // Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
-      phone
-    })
+    let user
+    if (isMemoryMode) {
+      const id = generateId()
+      const hashed = await bcrypt.hash(password, 10)
+      user = {
+        _id: id,
+        name,
+        email,
+        password: hashed,
+        phone,
+        monthlyBudget: 0,
+        weeklyBudget: 0,
+        semesterBudget: 0,
+        currency: 'USD',
+        notificationsEnabled: true,
+        autoCategorize: true,
+        favoriteCategories: [],
+        goals: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        toObject: function() { return { ...this } },
+        toJSON: function() { const o = this.toObject(); delete o.password; return o }
+      }
+      memory.users.set(id, user)
+      memory.counters.users++
+    } else {
+      user = await User.create({ name, email, password, phone })
+    }
 
     // Generate token
     const token = generateToken(user._id)
@@ -62,20 +85,33 @@ const login = async (req, res) => {
   const { email, password } = req.body
 
   try {
-    // Check for user
-    const user = await User.findOne({ email }).select('+password')
+    let user
+    if (isMemoryMode) {
+      for (const [, u] of memory.users) {
+        if (u.email === email) { user = u; break }
+      }
+    } else {
+      user = await User.findOne({ email }).select('+password')
+    }
     if (!user) {
       return res.status(401).json({ msg: 'Invalid credentials' })
     }
 
-    // Check password
-    const isMatch = await user.matchPassword(password)
+    let isMatch
+    if (isMemoryMode) {
+      isMatch = await bcrypt.compare(password, user.password)
+    } else {
+      isMatch = await user.matchPassword(password)
+    }
     if (!isMatch) {
       return res.status(401).json({ msg: 'Invalid credentials' })
     }
 
     // Generate token
     const token = generateToken(user._id)
+    if (isMemoryMode) {
+      memory.tokenUsers.set(token, user._id)
+    }
 
     res.json({
       token,
@@ -104,7 +140,12 @@ const login = async (req, res) => {
 // @access  Private
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
     }
@@ -138,7 +179,12 @@ const updateProfile = async (req, res) => {
   const { name, phone, monthlyBudget, weeklyBudget, semesterBudget, currency, notificationsEnabled, autoCategorize } = req.body
 
   try {
-    const user = await User.findById(req.user.id)
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
 
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
@@ -153,7 +199,11 @@ const updateProfile = async (req, res) => {
     if (notificationsEnabled !== undefined) user.notificationsEnabled = notificationsEnabled
     if (autoCategorize !== undefined) user.autoCategorize = autoCategorize
 
-    await user.save()
+    if (isMemoryMode) {
+      user.updatedAt = new Date()
+    } else {
+      await user.save()
+    }
 
     res.json({
       user: {
@@ -182,13 +232,20 @@ const updatePassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body
 
   try {
-    const user = await User.findById(req.user.id).select('+password')
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id).select('+password')
+    }
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
     }
 
     // Check current password
-    const isMatch = await user.matchPassword(currentPassword)
+    const isMatch = isMemoryMode
+      ? await bcrypt.compare(currentPassword, user.password)
+      : await user.matchPassword(currentPassword)
     if (!isMatch) {
       return res.status(400).json({ msg: 'Current password is incorrect' })
     }
@@ -198,8 +255,14 @@ const updatePassword = async (req, res) => {
       return res.status(400).json({ msg: 'New password must be at least 6 characters' })
     }
 
-    user.password = newPassword
-    await user.save()
+    user.password = isMemoryMode
+      ? await bcrypt.hash(newPassword, 10)
+      : newPassword
+    if (isMemoryMode) {
+      user.updatedAt = new Date()
+    } else {
+      await user.save()
+    }
 
     const token = generateToken(user._id)
 
@@ -218,9 +281,22 @@ const updatePassword = async (req, res) => {
 // @access  Private
 const deleteAccount = async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.user.id)
-    await require('../models/Transaction').deleteMany({ user: req.user.id })
-    await require('../models/Budget').deleteMany({ user: req.user.id })
+    if (isMemoryMode) {
+      memory.users.delete(req.user.id)
+      for (const [id, t] of memory.transactions) {
+        if (t.user === req.user.id) memory.transactions.delete(id)
+      }
+      for (const [id, b] of memory.budgets) {
+        if (b.user === req.user.id) memory.budgets.delete(id)
+      }
+      for (const [id, g] of memory.goals) {
+        if (g.user === req.user.id) memory.goals.delete(id)
+      }
+    } else {
+      await User.findByIdAndDelete(req.user.id)
+      await require('../models/Transaction').deleteMany({ user: req.user.id })
+      await require('../models/Budget').deleteMany({ user: req.user.id })
+    }
     res.json({ msg: 'Account deleted successfully' })
   } catch (error) {
     console.error('Delete account error:', error)
@@ -235,13 +311,22 @@ const updateFavorites = async (req, res) => {
   const { favoriteCategories } = req.body
 
   try {
-    const user = await User.findById(req.user.id)
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
     }
 
     user.favoriteCategories = favoriteCategories || []
-    await user.save()
+    if (isMemoryMode) {
+      user.updatedAt = new Date()
+    } else {
+      await user.save()
+    }
 
     res.json({
       user: {

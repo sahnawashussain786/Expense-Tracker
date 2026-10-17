@@ -12,6 +12,9 @@ export default function Settings() {
   const [globalLoading, setGlobalLoading] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
 
+  const setGlobalLoadingTrue = () => setGlobalLoading(true)
+  const setGlobalLoadingFalse = () => setGlobalLoading(false)
+
   // Profile
   const [name, setName] = useState(user?.name || '')
   const [phone, setPhone] = useState(user?.phone || '')
@@ -43,7 +46,7 @@ export default function Settings() {
   }
 
   const handleProfileSave = async () => {
-    globalLoading = true
+    setGlobalLoading(true)
     try {
       const res = await updateProfile({ name, phone })
       if (res.success) {
@@ -55,12 +58,12 @@ export default function Settings() {
     } catch {
       setMsg('error', 'Failed to update profile')
     } finally {
-      globalLoading = false
+      setGlobalLoading(false)
     }
   }
 
   const handleBudgetSave = async () => {
-    globalLoading = true
+    setGlobalLoading(true)
     try {
       const res = await updateProfile({ monthlyBudget: Number(monthlyBudget) || 0, weeklyBudget: Number(weeklyBudget) || 0, semesterBudget: Number(semesterBudget) || 0 })
       if (res.success) {
@@ -72,20 +75,20 @@ export default function Settings() {
     } catch {
       setMsg('error', 'Failed to save budgets')
     } finally {
-      globalLoading = false
+      setGlobalLoading(false)
     }
   }
 
   const handlePasswordUpdate = async () => {
-    globalLoading = true
+    setGlobalLoading(true)
     if (newPassword !== confirmPassword) {
       setMsg('error', 'Passwords do not match')
-      globalLoading = false
+      setGlobalLoading(false)
       return
     }
     if (newPassword.length < 6) {
       setMsg('error', 'New password must be at least 6 characters')
-      globalLoading = false
+      setGlobalLoading(false)
       return
     }
     try {
@@ -102,12 +105,12 @@ export default function Settings() {
     } catch {
       setMsg('error', 'Failed to change password')
     } finally {
-      globalLoading = false
+      setGlobalLoading(false)
     }
   }
 
   const handleFavoritesSave = async () => {
-    globalLoading = true
+    setGlobalLoading(true)
     try {
       const res = await updateFavorites(favoriteCategories)
       if (res.success) {
@@ -119,7 +122,7 @@ export default function Settings() {
     } catch {
       setMsg('error', 'Failed to update favorites')
     } finally {
-      globalLoading = false
+      setGlobalLoading(false)
     }
   }
 

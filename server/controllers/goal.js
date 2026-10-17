@@ -1,18 +1,26 @@
 const User = require('../models/User')
 const Transaction = require('../models/Transaction')
+const { isMemoryMode, memory } = require('../db')
 
 // @desc    Get user goals
 // @route   GET /api/goals
 // @access  Private
 const getGoals = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('goals')
-    if (!user) {
-      return res.status(404).json({ msg: 'User not found' })
-    }
+  let user
+  if (isMemoryMode) {
+    user = memory.users.get(req.user.id) || null
+  } else {
+    user = await User.findById(req.user.id).select('goals')
+  }
+  if (!user) {
+    return res.status(404).json({ msg: 'User not found' })
+  }
 
-    // Enrich goals with transaction progress
-    const enrichedGoals = await Promise.all(user.goals.map(async (goal) => {
+  const userGoals = user.goals || []
+
+  // Enrich goals with transaction progress
+  const enrichedGoals = await Promise.all(userGoals.map(async (goal) => {
       let spentOnCategory = 0
       if (goal.category) {
         const result = await Transaction.aggregate([
@@ -55,33 +63,59 @@ const createGoal = async (req, res) => {
   const { name, targetAmount, currentAmount = 0, deadline, category, color } = req.body
 
   try {
-    const user = await User.findById(req.user.id)
-    if (!user) {
-      return res.status(404).json({ msg: 'User not found' })
-    }
-
     if (!name || !targetAmount) {
       return res.status(400).json({ msg: 'Name and target amount are required' })
     }
 
-    user.goals.push({
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
+    if (!user) {
+      return res.status(404).json({ msg: 'User not found' })
+    }
+
+    const goalObj = {
+      _id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name,
       targetAmount,
-      currentAmount,
+      currentAmount: currentAmount || 0,
       deadline: deadline ? new Date(deadline) : null,
       category: category || null,
-      color: color || '#3B82F6'
-    })
+      color: color || '#3B82F6',
+      createdAt: new Date(),
+    }
 
-    await user.save()
+    if (isMemoryMode) {
+      if (!user.goals) user.goals = []
+      user.goals.push(goalObj)
+      user.updatedAt = new Date()
+    } else {
+      user.goals.push({
+        name,
+        targetAmount,
+        currentAmount,
+        deadline: deadline ? new Date(deadline) : null,
+        category: category || null,
+        color: color || '#3B82F6'
+      })
+      await user.save()
+    }
 
-    const goal = user.goals[user.goals.length - 1]
     const progress = targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 100) : 0
 
     res.status(201).json({
       goal: {
-        ...goal.toObject(),
-        currentAmount,
+        _id: goalObj._id,
+        name: goalObj.name,
+        targetAmount: goalObj.targetAmount,
+        currentAmount: goalObj.currentAmount,
+        deadline: goalObj.deadline ? goalObj.deadline.toISOString() : null,
+        category: goalObj.category,
+        color: goalObj.color,
+        createdAt: new Date(goalObj.createdAt).toISOString(),
         progress
       }
     })
@@ -98,17 +132,23 @@ const updateGoal = async (req, res) => {
   const { name, targetAmount, currentAmount, deadline, category, color, isActive } = req.body
 
   try {
-    const user = await User.findById(req.user.id)
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
     }
 
-    const goalIndex = user.goals.findIndex(g => g._id.toString() === req.params.id)
+    const goals = user.goals || []
+    const goalIndex = goals.findIndex(g => g._id === req.params.id || g._id.toString() === req.params.id)
     if (goalIndex === -1) {
       return res.status(404).json({ msg: 'Goal not found' })
     }
 
-    const goal = user.goals[goalIndex]
+    const goal = goals[goalIndex]
 
     if (name !== undefined) goal.name = name
     if (targetAmount !== undefined) goal.targetAmount = targetAmount
@@ -117,14 +157,24 @@ const updateGoal = async (req, res) => {
     if (category !== undefined) goal.category = category
     if (color) goal.color = color
 
-    await user.save()
+    if (isMemoryMode) {
+      user.updatedAt = new Date()
+    } else {
+      await user.save()
+    }
 
     const progress = goal.targetAmount > 0 ? Math.round(((goal.currentAmount || 0) / goal.targetAmount) * 100) : 0
 
     res.json({
       goal: {
-        ...goal.toObject(),
+        _id: goal._id,
+        name: goal.name,
+        targetAmount: goal.targetAmount,
         currentAmount: goal.currentAmount || 0,
+        deadline: goal.deadline ? new Date(goal.deadline).toISOString() : null,
+        category: goal.category,
+        color: goal.color,
+        createdAt: new Date(goal.createdAt).toISOString(),
         progress
       }
     })
@@ -139,19 +189,29 @@ const updateGoal = async (req, res) => {
 // @access  Private
 const deleteGoal = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
+    let user
+    if (isMemoryMode) {
+      user = memory.users.get(req.user.id) || null
+    } else {
+      user = await User.findById(req.user.id)
+    }
     if (!user) {
       return res.status(404).json({ msg: 'User not found' })
     }
 
-    const initialLength = user.goals.length
-    user.goals = user.goals.filter(g => g._id.toString() !== req.params.id)
+    const goals = user.goals || []
+    const initialLength = goals.length
+    user.goals = goals.filter(g => g._id !== req.params.id && g._id.toString() !== req.params.id)
 
     if (user.goals.length === initialLength) {
       return res.status(404).json({ msg: 'Goal not found' })
     }
 
-    await user.save()
+    if (isMemoryMode) {
+      user.updatedAt = new Date()
+    } else {
+      await user.save()
+    }
 
     res.json({ msg: 'Goal deleted' })
   } catch (error) {

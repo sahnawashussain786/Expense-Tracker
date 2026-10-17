@@ -1,7 +1,7 @@
 const mongoose = require('mongoose')
-const Schema = mongoose.Schema
+const { isMemoryMode, memory, generateId } = require('../db')
 
-const budgetSchema = new Schema({
+const budgetSchema = new mongoose.Schema({
   user: {
     type: Schema.Types.ObjectId,
     ref: 'User',

@@ -1,5 +1,6 @@
 const Budget = require('../models/Budget')
 const Transaction = require('../models/Transaction')
+const { isMemoryMode, memory } = require('../db')
 
 // @desc    Create a new budget
 // @route   POST /api/budgets
@@ -9,28 +10,64 @@ const createBudget = async (req, res) => {
 
   try {
     // Check for duplicate
-    const existing = await Budget.findOne({
-      user: req.user.id,
-      name,
-      period
-    })
+    let existing
+    if (isMemoryMode) {
+      for (const [id, b] of memory.budgets) {
+        if (b.user === req.user.id && b.name === name && b.period === period) {
+          existing = b
+          break
+        }
+      }
+    } else {
+      existing = await Budget.findOne({
+        user: req.user.id,
+        name,
+        period
+      })
+    }
 
     if (existing) {
       return res.status(400).json({ msg: 'A budget with this name and period already exists' })
     }
 
-    const budget = await Budget.create({
-      user: req.user.id,
-      name,
-      amount,
-      period,
-      category,
-      startDate: startDate ? new Date(startDate) : new Date(),
-      endDate: endDate ? new Date(endDate) : null,
-      alertThreshold: alertThreshold || 80,
-      color,
-      notes
-    })
+    const uid = req.user.id
+    let budget
+    if (isMemoryMode) {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      const now = new Date()
+      budget = {
+        _id: id,
+        user: uid,
+        name,
+        amount,
+        period,
+        category: category || null,
+        startDate: startDate ? new Date(startDate) : now,
+        endDate: endDate ? new Date(endDate) : null,
+        alertThreshold: alertThreshold || 80,
+        color: color || '#3B82F6',
+        notes: notes || '',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        toObject: function() { return { ...this } },
+      }
+      memory.budgets.set(id, budget)
+      memory.counters.budgets++
+    } else {
+      budget = await Budget.create({
+        user: uid,
+        name,
+        amount,
+        period,
+        category,
+        startDate: startDate ? new Date(startDate) : new Date(),
+        endDate: endDate ? new Date(endDate) : null,
+        alertThreshold: alertThreshold || 80,
+        color,
+        notes
+      })
+    }
 
     res.status(201).json({ budget })
   } catch (error) {
@@ -44,9 +81,20 @@ const createBudget = async (req, res) => {
 // @access  Private
 const getBudgets = async (req, res) => {
   try {
-    const budgets = await Budget.find({ user: req.user.id, isActive: true })
-      .sort({ createdAt: -1 })
-      .lean()
+    let budgets
+    if (isMemoryMode) {
+      budgets = []
+      for (const [id, b] of memory.budgets) {
+        if (b.user === req.user.id && b.isActive !== false) {
+          budgets.push(b)
+        }
+      }
+      budgets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    } else {
+      budgets = await Budget.find({ user: req.user.id, isActive: true })
+        .sort({ createdAt: -1 })
+        .lean()
+    }
 
     // Enrich with current usage
     const enrichedBudgets = await Promise.all(budgets.map(async (budget) => {
@@ -114,10 +162,20 @@ const updateBudget = async (req, res) => {
   const { name, amount, period, category, startDate, endDate, alertThreshold, color, notes, isActive } = req.body
 
   try {
-    const budget = await Budget.findOne({
-      _id: req.params.id,
-      user: req.user.id
-    })
+    let budget
+    if (isMemoryMode) {
+      for (const [id, b] of memory.budgets) {
+        if (b._id === req.params.id && b.user === req.user.id) {
+          budget = b
+          break
+        }
+      }
+    } else {
+      budget = await Budget.findOne({
+        _id: req.params.id,
+        user: req.user.id
+      })
+    }
 
     if (!budget) {
       return res.status(404).json({ msg: 'Budget not found' })
@@ -134,7 +192,12 @@ const updateBudget = async (req, res) => {
     if (notes !== undefined) budget.notes = notes
     if (isActive !== undefined) budget.isActive = isActive
 
-    await budget.save()
+    budget.updatedAt = new Date()
+    if (isMemoryMode) {
+      memory.budgets.set(budget._id, budget)
+    } else {
+      await budget.save()
+    }
 
     const spent = await getBudgetSpent(req.user.id, budget)
     const percentUsed = Math.round((spent / budget.amount) * 100)
@@ -159,16 +222,30 @@ const updateBudget = async (req, res) => {
 // @access  Private
 const deleteBudget = async (req, res) => {
   try {
-    const budget = await Budget.findOne({
-      _id: req.params.id,
-      user: req.user.id
-    })
+    let budget
+    if (isMemoryMode) {
+      for (const [id, b] of memory.budgets) {
+        if (b._id === req.params.id && b.user === req.user.id) {
+          budget = b
+          break
+        }
+      }
+    } else {
+      budget = await Budget.findOne({
+        _id: req.params.id,
+        user: req.user.id
+      })
+    }
 
     if (!budget) {
       return res.status(404).json({ msg: 'Budget not found' })
     }
 
-    await budget.deleteOne()
+    if (isMemoryMode) {
+      memory.budgets.delete(budget._id)
+    } else {
+      await budget.deleteOne()
+    }
 
     res.json({ msg: 'Budget deleted' })
   } catch (error) {

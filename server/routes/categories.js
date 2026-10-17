@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const Transaction = require('../models/Transaction')
+const { isMemoryMode, memory } = require('../db')
 const auth = require('../middleware/auth')
 
 const categoryIcons = {
@@ -49,23 +50,45 @@ router.get('/', auth, async (req, res) => {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
 
   try {
-    const result = await Transaction.aggregate([
-      {
-        $match: {
-          user: req.user.id,
-          type: 'expense',
-          date: { $gte: monthStart }
-        }
-      },
-      {
-        $group: {
-          _id: '$category',
-          total: { $sum: '$amount' },
-          count: { $sum: 1 },
-          avgTransaction: { $avg: '$amount' }
-        }
+    let result
+    if (isMemoryMode) {
+      const grouped = {}
+      for (const [id, t] of memory.transactions) {
+        if (t.user !== req.user.id) continue
+        if (t.type !== 'expense') continue
+        if (new Date(t.date) < monthStart) continue
+        const cat = t.category
+        if (!grouped[cat]) grouped[cat] = { _id: cat, total: 0, count: 0, amounts: [] }
+        grouped[cat].total += t.amount
+        grouped[cat].count += 1
+        grouped[cat].amounts.push(t.amount)
       }
-    ])
+      result = Object.values(grouped).map(g => ({
+        _id: g._id,
+        total: g.total,
+        count: g.count,
+        avgTransaction: g.count > 0 ? g.total / g.count : 0
+      }))
+      result.sort((a, b) => b.total - a.total)
+    } else {
+      result = await Transaction.aggregate([
+        {
+          $match: {
+            user: req.user.id,
+            type: 'expense',
+            date: { $gte: monthStart }
+          }
+        },
+        {
+          $group: {
+            _id: '$category',
+            total: { $sum: '$amount' },
+            count: { $sum: 1 },
+            avgTransaction: { $avg: '$amount' }
+          }
+        }
+      ])
+    }
 
     const spendingMap = {}
     result.forEach(r => {

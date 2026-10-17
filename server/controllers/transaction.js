@@ -1,5 +1,6 @@
 const Transaction = require('../models/Transaction')
 const Budget = require('../models/Budget')
+const { isMemoryMode, memory } = require('../db')
 
 // @desc    Create a new transaction
 // @route   POST /api/transactions
@@ -22,19 +23,45 @@ const createTransaction = async (req, res) => {
       return res.status(400).json({ msg: 'Category is required' })
     }
 
-    const transaction = await Transaction.create({
-      user: userId || req.user.id,
-      description,
-      amount,
-      category: finalCategory,
-      type: type || 'expense',
-      date,
-      paymentMethod,
-      note,
-      tags,
-      isRecurring,
-      merchant
-    })
+    const uid = userId || req.user.id
+    let transaction
+    if (isMemoryMode) {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      const now = new Date()
+      transaction = {
+        _id: id,
+        user: uid,
+        description,
+        amount,
+        category: finalCategory,
+        type: type || 'expense',
+        date: date || now,
+        paymentMethod: paymentMethod || 'Cash',
+        note,
+        tags: tags || [],
+        isRecurring: isRecurring || false,
+        merchant: merchant || '',
+        createdAt: now,
+        updatedAt: now,
+        toObject: function() { return { ...this } },
+      }
+      memory.transactions.set(id, transaction)
+      memory.counters.transactions++
+    } else {
+      transaction = await Transaction.create({
+        user: uid,
+        description,
+        amount,
+        category: finalCategory,
+        type: type || 'expense',
+        date,
+        paymentMethod,
+        note,
+        tags,
+        isRecurring,
+        merchant
+      })
+    }
 
     // Check budget warning
     const budgetAlerts = await checkBudgetAlerts(req.user.id, finalCategory)
@@ -87,19 +114,52 @@ const getTransactions = async (req, res) => {
     // Get total count
     const total = await Transaction.countDocuments(query)
 
-    // Get paginated results
-    const transactions = await Transaction.find(query)
-      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .lean()
+    let transactions
+    if (isMemoryMode) {
+      const docs = []
+      for (const [id, t] of memory.transactions) {
+        if (t.user !== req.user.id) continue
+        if (type && t.type !== type) continue
+        if (category && t.category !== category) continue
+        if (startDate && new Date(t.date) < new Date(startDate)) continue
+        if (endDate && new Date(t.date) > new Date(endDate)) continue
+        if (minAmount && t.amount < Number(minAmount)) continue
+        if (maxAmount && t.amount > Number(maxAmount)) continue
+        if (search) {
+          const s = search.toLowerCase()
+          if (!t.description.toLowerCase().includes(s) && !(t.merchant || '').toLowerCase().includes(s)) continue
+        }
+        docs.push(t)
+      }
+      docs.sort((a, b) => {
+        const av = a[sortBy] || a.date
+        const bv = b[sortBy] || b.date
+        return sortOrder === 'desc' ? new Date(bv) - new Date(av) : new Date(av) - new Date(bv)
+      })
+      transactions = docs.slice((page - 1) * limit, page * limit)
+    } else {
+      const transactions = await Transaction.find(query)
+        .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+        .limit(limit * 1)
+        .skip((page - 1) * limit)
+        .lean()
+    }
 
-    // Format dates
     const formatted = transactions.map(t => ({
-      ...t,
-      date: t.date.toISOString(),
-      createdAt: t.createdAt.toISOString(),
-      updatedAt: t.updatedAt?.toISOString()
+      _id: t._id,
+      user: t.user,
+      description: t.description,
+      amount: t.amount,
+      category: t.category,
+      type: t.type,
+      date: new Date(t.date).toISOString(),
+      paymentMethod: t.paymentMethod,
+      note: t.note,
+      tags: t.tags || [],
+      isRecurring: t.isRecurring || false,
+      merchant: t.merchant,
+      createdAt: new Date(t.createdAt).toISOString(),
+      updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : null
     }))
 
     res.json({
@@ -122,10 +182,20 @@ const getTransactions = async (req, res) => {
 // @access  Private
 const getTransaction = async (req, res) => {
   try {
-    const transaction = await Transaction.findOne({
-      _id: req.params.id,
-      user: req.user.id
-    })
+    let transaction
+    if (isMemoryMode) {
+      for (const [id, t] of memory.transactions) {
+        if (t._id === req.params.id && t.user === req.user.id) {
+          transaction = t
+          break
+        }
+      }
+    } else {
+      transaction = await Transaction.findOne({
+        _id: req.params.id,
+        user: req.user.id
+      })
+    }
 
     if (!transaction) {
       return res.status(404).json({ msg: 'Transaction not found' })
@@ -133,8 +203,20 @@ const getTransaction = async (req, res) => {
 
     res.json({
       transaction: {
-        ...transaction.toObject(),
-        date: transaction.date.toISOString()
+        _id: transaction._id,
+        user: transaction.user,
+        description: transaction.description,
+        amount: transaction.amount,
+        category: transaction.category,
+        type: transaction.type,
+        date: new Date(transaction.date).toISOString(),
+        paymentMethod: transaction.paymentMethod,
+        note: transaction.note,
+        tags: transaction.tags || [],
+        isRecurring: transaction.isRecurring || false,
+        merchant: transaction.merchant,
+        createdAt: new Date(transaction.createdAt).toISOString(),
+        updatedAt: transaction.updatedAt ? new Date(transaction.updatedAt).toISOString() : null
       }
     })
   } catch (error) {
@@ -150,10 +232,20 @@ const updateTransaction = async (req, res) => {
   const { description, amount, category, type, date, paymentMethod, note, tags, isRecurring, merchant } = req.body
 
   try {
-    const transaction = await Transaction.findOne({
-      _id: req.params.id,
-      user: req.user.id
-    })
+    let transaction
+    if (isMemoryMode) {
+      for (const [id, t] of memory.transactions) {
+        if (t._id === req.params.id && t.user === req.user.id) {
+          transaction = t
+          break
+        }
+      }
+    } else {
+      transaction = await Transaction.findOne({
+        _id: req.params.id,
+        user: req.user.id
+      })
+    }
 
     if (!transaction) {
       return res.status(404).json({ msg: 'Transaction not found' })
@@ -169,13 +261,30 @@ const updateTransaction = async (req, res) => {
     if (tags !== undefined) transaction.tags = tags
     if (isRecurring !== undefined) transaction.isRecurring = isRecurring
     if (merchant !== undefined) transaction.merchant = merchant
+    transaction.updatedAt = new Date()
 
-    await transaction.save()
+    if (isMemoryMode) {
+      memory.transactions.set(transaction._id, transaction)
+    } else {
+      await transaction.save()
+    }
 
     res.json({
       transaction: {
-        ...transaction.toObject(),
-        date: transaction.date.toISOString()
+        _id: transaction._id,
+        user: transaction.user,
+        description: transaction.description,
+        amount: transaction.amount,
+        category: transaction.category,
+        type: transaction.type,
+        date: new Date(transaction.date).toISOString(),
+        paymentMethod: transaction.paymentMethod,
+        note: transaction.note,
+        tags: transaction.tags || [],
+        isRecurring: transaction.isRecurring || false,
+        merchant: transaction.merchant,
+        createdAt: new Date(transaction.createdAt).toISOString(),
+        updatedAt: new Date(transaction.updatedAt).toISOString()
       }
     })
   } catch (error) {
@@ -189,16 +298,30 @@ const updateTransaction = async (req, res) => {
 // @access  Private
 const deleteTransaction = async (req, res) => {
   try {
-    const transaction = await Transaction.findOne({
-      _id: req.params.id,
-      user: req.user.id
-    })
+    let transaction
+    if (isMemoryMode) {
+      for (const [id, t] of memory.transactions) {
+        if (t._id === req.params.id && t.user === req.user.id) {
+          transaction = t
+          break
+        }
+      }
+    } else {
+      transaction = await Transaction.findOne({
+        _id: req.params.id,
+        user: req.user.id
+      })
+    }
 
     if (!transaction) {
       return res.status(404).json({ msg: 'Transaction not found' })
     }
 
-    await transaction.deleteOne()
+    if (isMemoryMode) {
+      memory.transactions.delete(transaction._id)
+    } else {
+      await transaction.deleteOne()
+    }
 
     res.json({ msg: 'Transaction removed' })
   } catch (error) {
@@ -221,7 +344,8 @@ const bulkImport = async (req, res) => {
     const created = []
     const errors = []
 
-    for (const t of transactions) {
+    for (let i = 0; i < transactions.length; i++) {
+      const t = transactions[i]
       try {
         let category = t.category
         if (!category && req.user.autoCategorize) {
@@ -230,26 +354,51 @@ const bulkImport = async (req, res) => {
         }
 
         if (!category) {
-          errors.push({ index: transactions.indexOf(t), error: 'Category is required' })
+          errors.push({ index: i, error: 'Category is required' })
           continue
         }
 
-        const transaction = await Transaction.create({
-          user: req.user.id,
-          description: t.description,
-          amount: t.amount,
-          category,
-          type: t.type || 'expense',
-          date: t.date ? new Date(t.date) : Date.now(),
-          paymentMethod: t.paymentMethod || 'Cash',
-          note: t.note,
-          tags: t.tags,
-          isRecurring: t.isRecurring || false,
-          merchant: t.merchant
-        })
+        let transaction
+        if (isMemoryMode) {
+          const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '_' + i
+          const now = new Date(t.date || Date.now())
+          transaction = {
+            _id: id,
+            user: req.user.id,
+            description: t.description,
+            amount: t.amount,
+            category,
+            type: t.type || 'expense',
+            date: now,
+            paymentMethod: t.paymentMethod || 'Cash',
+            note: t.note,
+            tags: t.tags || [],
+            isRecurring: t.isRecurring || false,
+            merchant: t.merchant || '',
+            createdAt: now,
+            updatedAt: now,
+            toObject: function() { return { ...this } },
+          }
+          memory.transactions.set(id, transaction)
+          memory.counters.transactions++
+        } else {
+          transaction = await Transaction.create({
+            user: req.user.id,
+            description: t.description,
+            amount: t.amount,
+            category,
+            type: t.type || 'expense',
+            date: t.date ? new Date(t.date) : Date.now(),
+            paymentMethod: t.paymentMethod || 'Cash',
+            note: t.note,
+            tags: t.tags,
+            isRecurring: t.isRecurring || false,
+            merchant: t.merchant
+          })
+        }
         created.push(transaction)
       } catch (err) {
-        errors.push({ index: transactions.indexOf(t), error: err.message })
+        errors.push({ index: i, error: err.message })
       }
     }
 
@@ -410,14 +559,27 @@ const getBudgetAlerts = async (req, res) => {
 async function checkBudgetAlerts(userId, category = null) {
   const now = new Date()
   const alerts = []
+  const uid = typeof userId === 'object' && userId._id ? userId._id : userId
 
   // Monthly budget check
   if (userId.monthlyBudget && userId.monthlyBudget > 0) {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const spent = await Transaction.aggregate([
-      { $match: { user: userId._id || userId, type: 'expense', date: { $gte: monthStart } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ])
+    let spent
+    if (isMemoryMode) {
+      let total = 0
+      for (const [id, t] of memory.transactions) {
+        if (t.user !== uid) continue
+        if (t.type !== 'expense') continue
+        if (new Date(t.date) < monthStart) continue
+        total += t.amount
+      }
+      spent = [{ total }]
+    } else {
+      spent = await Transaction.aggregate([
+        { $match: { user: uid, type: 'expense', date: { $gte: monthStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ])
+    }
     const totalSpent = spent.length > 0 ? spent[0].total : 0
     const remaining = userId.monthlyBudget - totalSpent
     const percentUsed = Math.round((totalSpent / userId.monthlyBudget) * 100)
@@ -440,10 +602,22 @@ async function checkBudgetAlerts(userId, category = null) {
     const weekStart = new Date(now)
     weekStart.setDate(now.getDate() - now.getDay())
     weekStart.setHours(0, 0, 0, 0)
-    const spent = await Transaction.aggregate([
-      { $match: { user: userId._id || userId, type: 'expense', date: { $gte: weekStart } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ])
+    let spent
+    if (isMemoryMode) {
+      let total = 0
+      for (const [id, t] of memory.transactions) {
+        if (t.user !== uid) continue
+        if (t.type !== 'expense') continue
+        if (new Date(t.date) < weekStart) continue
+        total += t.amount
+      }
+      spent = [{ total }]
+    } else {
+      spent = await Transaction.aggregate([
+        { $match: { user: uid, type: 'expense', date: { $gte: weekStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ])
+    }
     const totalSpent = spent.length > 0 ? spent[0].total : 0
     const remaining = userId.weeklyBudget - totalSpent
     const percentUsed = Math.round((totalSpent / userId.weeklyBudget) * 100)
@@ -462,18 +636,42 @@ async function checkBudgetAlerts(userId, category = null) {
   }
 
   // Category-specific budgets
-  const categoryBudgets = await Budget.find({
-    user: userId._id || userId,
-    isActive: true,
-    ...(category && { category })
-  })
+  let categoryBudgets
+  if (isMemoryMode) {
+    categoryBudgets = []
+    for (const [id, b] of memory.budgets) {
+      if (b.user !== uid) continue
+      if (b.isActive === false) continue
+      if (category && b.category !== category) continue
+      categoryBudgets.push(b)
+    }
+  } else {
+    categoryBudgets = await Budget.find({
+      user: uid,
+      isActive: true,
+      ...(category && { category })
+    })
+  }
 
   for (const budget of categoryBudgets) {
     const periodStart = getPeriodStart(budget.period, budget.startDate || now)
-    const spent = await Transaction.aggregate([
-      { $match: { user: userId._id || userId, type: 'expense', category: budget.category || { $exists: true }, date: { $gte: periodStart } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ])
+    let spent
+    if (isMemoryMode) {
+      let total = 0
+      for (const [id, t] of memory.transactions) {
+        if (t.user !== uid) continue
+        if (t.type !== 'expense') continue
+        if (budget.category && t.category !== budget.category) continue
+        if (new Date(t.date) < periodStart) continue
+        total += t.amount
+      }
+      spent = [{ total }]
+    } else {
+      spent = await Transaction.aggregate([
+        { $match: { user: uid, type: 'expense', category: budget.category || { $exists: true }, date: { $gte: periodStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ])
+    }
     const totalSpent = spent.length > 0 ? spent[0].total : 0
     const remaining = budget.amount - totalSpent
     const percentUsed = Math.round((totalSpent / budget.amount) * 100)

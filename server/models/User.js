@@ -1,8 +1,8 @@
 const mongoose = require('mongoose')
-const Schema = mongoose.Schema
 const bcrypt = require('bcryptjs')
+const { isMemoryMode, memory, generateId } = require('../db')
 
-const userSchema = new Schema({
+const userSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Name is required'],
